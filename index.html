@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>webcam ca glitch :: 800x800 low-fi</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0a0c12;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Courier New', 'VT323', monospace;
+            font-weight: normal;
+            padding: 1rem;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.2rem;
+        }
+
+        canvas {
+            display: block;
+            box-shadow: 4px 4px 0px #000000;
+            border: 2px solid #2e2e3a;
+            image-rendering: crisp-edges;
+            image-rendering: pixelated;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            justify-content: center;
+            background: #0f1119;
+            padding: 0.75rem 1.5rem;
+            border: 1px solid #3a3f4e;
+            box-shadow: inset 0 0 0 1px #1e212c, 3px 3px 0 #050608;
+        }
+
+        button {
+            background: #1a1d2b;
+            border: none;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            padding: 0.5rem 1.2rem;
+            color: #cbd5e6;
+            border-bottom: 2px solid #2e3b4e;
+            border-right: 1px solid #2a2f3e;
+            cursor: pointer;
+            transition: 0.05s linear;
+            box-shadow: 2px 2px 0 #030405;
+            text-transform: uppercase;
+        }
+
+        button:active {
+            transform: translate(2px, 2px);
+            box-shadow: 0px 0px 0 #030405;
+            border-bottom: 1px solid #2e3b4e;
+        }
+
+        .status-bar {
+            font-family: 'Courier New', monospace;
+            font-size: 0.7rem;
+            background: #0b0d14;
+            padding: 0.3rem 1rem;
+            border-left: 4px solid #7e8c8f;
+            color: #b3bbc8;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .info-text {
+            font-size: 0.65rem;
+            color: #6a6f82;
+            text-align: center;
+            max-width: 600px;
+            border-top: 1px dashed #2a2e3c;
+            padding-top: 0.7rem;
+            margin-top: 0.2rem;
+        }
+
+        a,
+        .info-text {
+            text-decoration: none;
+            color: #7f8b9e;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.0/p5.min.js"></script>
+</head>
+
+<body>
+    <div class="container">
+        <div id="canvas-holder"></div>
+        <div class="controls">
+            <button id="snapBtn">[ SNAP + GLITCH ]</button>
+            <button id="liveBtn">[ LIVE FEED ]</button>
+        </div>
+        <div class="status-bar" id="modeDisplay">MODE: LIVE (GRAYSCALE)</div>
+        <div class="info-text">
+            > rule: alive dies if east+west both alive ; dead born if north or south alive<br>
+            > [s] key saves canvas as png | glitch rows = random color per frame | 800x800
+        </div>
+    </div>
+
+    <script>
+        // --- parameters
+        let grid = [];
+        let nextGrid = [];
+        let video;
+        let snapshotImage = null;
+        let currentMode = "live";     // "live" or "glitch"
+        const GRID_SIZE = 200;        // 200 x 200 cells
+        const CELL_PX = 4;            // 200 * 4 = 800x800 canvas
+
+        let canvasRef;
+        let snapButton, liveButton, modeLabel;
+
+        function setup() {
+            const holder = select("#canvas-holder");
+            canvasRef = createCanvas(800, 800);
+            canvasRef.parent(holder);
+            pixelDensity(1);
+
+            // webcam at same resolution
+            video = createCapture(VIDEO, { flipped: true });
+            video.size(800, 800);
+            video.hide();
+
+            snapButton = select("#snapBtn");
+            liveButton = select("#liveBtn");
+            modeLabel = select("#modeDisplay");
+
+            snapButton.mousePressed(snapAndGlitch);
+            liveButton.mousePressed(returnToLive);
+
+            noStroke();
+            frameRate(12);
+            background(12);
+        }
+
+        // --- capture current grayscale frame and build grid
+        function snapAndGlitch() {
+            if (!video || video.width === 0) return;
+
+            let buffer = createGraphics(width, height);
+            buffer.image(video, 0, 0, width, height);
+            buffer.filter(GRAY);
+            snapshotImage = buffer.get();
+
+            initGridFromImage(snapshotImage);
+            currentMode = "glitch";
+            modeLabel.html("MODE: GLITCH (CA EVOLVING)");
+        }
+
+        // --- reset to live camera
+        function returnToLive() {
+            currentMode = "live";
+            grid = [];
+            nextGrid = [];
+            modeLabel.html("MODE: LIVE (GRAYSCALE)");
+        }
+
+        // --- build 200x200 grid from grayscale img (threshold 127)
+        function initGridFromImage(img) {
+            for (let j = 0; j < GRID_SIZE; j++) {
+                grid[j] = [];
+                for (let i = 0; i < GRID_SIZE; i++) {
+                    let col = img.get(i * CELL_PX, j * CELL_PX);
+                    let lum = (col[0] + col[1] + col[2]) / 3;
+                    grid[j][i] = lum > 127 ? 1 : 0;
+                }
+            }
+            // init nextGrid
+            for (let j = 0; j < GRID_SIZE; j++) {
+                nextGrid[j] = [];
+                for (let i = 0; i < GRID_SIZE; i++) {
+                    nextGrid[j][i] = grid[j][i];
+                }
+            }
+        }
+
+        // --- weird CA rule update
+        function updateCellular() {
+            for (let j = 1; j < GRID_SIZE - 1; j++) {
+                for (let i = 1; i < GRID_SIZE - 1; i++) {
+                    if (grid[j][i] === 1) {
+                        // alive: dies if east AND west neighbor both alive
+                        if (grid[j][i - 1] === 1 && grid[j][i + 1] === 1) {
+                            nextGrid[j][i] = 0;
+                        } else {
+                            nextGrid[j][i] = 1;
+                        }
+                    } else {
+                        // dead: becomes alive if north OR south neighbor alive
+                        if (grid[j - 1][i] === 1 || grid[j + 1][i] === 1) {
+                            nextGrid[j][i] = 1;
+                        } else {
+                            nextGrid[j][i] = 0;
+                        }
+                    }
+                }
+            }
+            // copy back
+            for (let j = 0; j < GRID_SIZE; j++) {
+                for (let i = 0; i < GRID_SIZE; i++) {
+                    grid[j][i] = nextGrid[j][i];
+                }
+            }
+        }
+
+        // --- render glitch: each row gets a fresh random color
+        function renderGlitch() {
+            for (let row = 0; row < GRID_SIZE; row++) {
+                let rowColor = color(random(30, 255), random(30, 255), random(30, 255));
+                for (let col = 0; col < GRID_SIZE; col++) {
+                    if (grid[row][col] === 1) {
+                        fill(rowColor);
+                    } else {
+                        fill(90, 61, 43);   // dead cell = rust/brown
+                    }
+                    rect(col * CELL_PX, row * CELL_PX, CELL_PX, CELL_PX);
+                }
+            }
+        }
+
+        // --- main draw loop
+        function draw() {
+            if (currentMode === "live") {
+                background(0);
+                image(video, 0, 0, width, height);
+                filter(GRAY);
+                fill(180, 190, 200);
+                noStroke();
+                textSize(11);
+                text("> CAM LIVE", 8, 22);
+            }
+            else if (currentMode === "glitch") {
+                if (grid.length && nextGrid.length) {
+                    updateCellular();
+                    renderGlitch();
+                } else {
+                    background(30);
+                    fill(200);
+                    text("no snapshot. click [ SNAP + GLITCH ]", 40, 400);
+                }
+                fill(220, 220, 200);
+                textSize(10);
+                text("> glitch active", 8, 22);
+            }
+        }
+
+        // --- save png with 's' key
+        function keyPressed() {
+            if (key === 's' || key === 'S') {
+                let d = new Date();
+                let timestamp = nf(d.getFullYear(), 4) + nf(d.getMonth() + 1, 2) + nf(d.getDate(), 2) + "_" + nf(d.getHours(), 2) + nf(d.getMinutes(), 2) + nf(d.getSeconds(), 2);
+                saveCanvas(`ca_glitch_${timestamp}`, 'png');
+            }
+        }
+
+        function windowResized() { }
+    </script>
+</body>
+
+</html>
