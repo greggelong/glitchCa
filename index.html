@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>fullscreen ca glitch – no gaps</title>
+    <title>fullscreen ca glitch – mobile fix</title>
     <style>
         * {
             margin: 0;
@@ -150,18 +150,26 @@
         let currentMode = "live";
 
         const GRID_SIZE = 200;
-        let cellW, cellH;               // float dimensions
+        let cellW, cellH;
 
         let snapButton, liveButton, modeLabel;
+        let videoReady = false;
 
         function setup() {
             createCanvas(windowWidth, windowHeight);
             pixelDensity(1);
-            noSmooth();                 // disable anti-aliasing
+            noSmooth();
 
+            // request camera with flip
             video = createCapture(VIDEO, { flipped: true });
             video.size(width, height);
             video.hide();
+
+            // wait for video to be ready
+            video.elt.addEventListener('loadeddata', () => {
+                videoReady = true;
+                console.log("video ready");
+            });
 
             snapButton = select("#snapBtn");
             liveButton = select("#liveBtn");
@@ -182,40 +190,61 @@
             cellH = height / GRID_SIZE;
         }
 
+        // capture current video frame using video.get() – reliable on mobile
         function captureSnapshot() {
-            let buffer = createGraphics(width, height);
-            buffer.image(video, 0, 0, width, height);
-            buffer.filter(GRAY);
-            return buffer.get();
+            if (!videoReady || !video) return null;
+            let frame = video.get();        // p5.Image at native video resolution (already flipped)
+            frame.filter(GRAY);
+            return frame;
         }
 
+        // build grid from the grayscale snapshot, mapping canvas cell centers to image coordinates
         function initGridFromImage(img) {
+            if (!img) return false;
+            let imgW = img.width;
+            let imgH = img.height;
+
             for (let j = 0; j < GRID_SIZE; j++) {
                 grid[j] = [];
                 for (let i = 0; i < GRID_SIZE; i++) {
-                    let sx = i * cellW + cellW / 2;
-                    let sy = j * cellH + cellH / 2;
-                    sx = constrain(sx, 0, img.width - 1);
-                    sy = constrain(sy, 0, img.height - 1);
+                    // center of the canvas cell
+                    let canvasX = i * cellW + cellW / 2;
+                    let canvasY = j * cellH + cellH / 2;
+                    // map to image pixel coordinates
+                    let sx = map(canvasX, 0, width, 0, imgW);
+                    let sy = map(canvasY, 0, height, 0, imgH);
+                    sx = constrain(Math.floor(sx), 0, imgW - 1);
+                    sy = constrain(Math.floor(sy), 0, imgH - 1);
                     let col = img.get(sx, sy);
                     let lum = (col[0] + col[1] + col[2]) / 3;
                     grid[j][i] = lum > 127 ? 1 : 0;
                 }
             }
+            // copy to nextGrid
             for (let j = 0; j < GRID_SIZE; j++) {
                 nextGrid[j] = [];
                 for (let i = 0; i < GRID_SIZE; i++) {
                     nextGrid[j][i] = grid[j][i];
                 }
             }
+            return true;
         }
 
         function snapAndGlitch() {
-            if (!video || video.width === 0) return;
-            snapshotImage = captureSnapshot();
-            initGridFromImage(snapshotImage);
-            currentMode = "glitch";
-            modeLabel.html("MODE: GLITCH (CA EVOLVING)");
+            if (!videoReady) {
+                console.log("camera not ready");
+                return;
+            }
+            let snapped = captureSnapshot();
+            if (!snapped) return;
+            snapshotImage = snapped;
+            let success = initGridFromImage(snapshotImage);
+            if (success) {
+                currentMode = "glitch";
+                modeLabel.html("MODE: GLITCH (CA EVOLVING)");
+            } else {
+                console.log("failed to init grid");
+            }
         }
 
         function returnToLive() {
@@ -250,9 +279,9 @@
             }
         }
 
-        // gapless rendering: force integer sizes and fill last row/column to edge
+        // gapless rendering (no black lines)
         function renderGlitch() {
-            noStroke();   // critical
+            noStroke();
             for (let row = 0; row < GRID_SIZE; row++) {
                 let rowColor = color(random(30, 255), random(30, 255), random(30, 255));
                 for (let col = 0; col < GRID_SIZE; col++) {
@@ -260,7 +289,6 @@
                     let y = row * cellH;
                     let w = (col === GRID_SIZE - 1) ? width - x : cellW;
                     let h = (row === GRID_SIZE - 1) ? height - y : cellH;
-                    // round up to avoid subpixel gaps
                     w = Math.ceil(w);
                     h = Math.ceil(h);
                     if (grid[row][col] === 1) {
@@ -276,19 +304,24 @@
         function draw() {
             if (currentMode === "live") {
                 background(0);
-                image(video, 0, 0, width, height);
-                filter(GRAY);
+                if (videoReady) {
+                    image(video, 0, 0, width, height);
+                    filter(GRAY);
+                } else {
+                    fill(100);
+                    text("waiting for camera...", 20, 40);
+                }
                 fill(180, 190, 200);
                 noStroke();
                 textSize(12);
                 text("> CAM LIVE (fullscreen)", 10, 25);
             }
             else if (currentMode === "glitch") {
-                background(0);
                 if (grid.length && nextGrid.length) {
                     updateCellular();
                     renderGlitch();
                 } else {
+                    background(30);
                     fill(200);
                     textSize(16);
                     text("no snapshot. click [ SNAP + GLITCH ]", width / 2 - 150, height / 2);
@@ -301,7 +334,9 @@
 
         function windowResized() {
             resizeCanvas(windowWidth, windowHeight);
-            video.size(width, height);
+            if (video && videoReady) {
+                video.size(width, height);
+            }
             updateCellDimensions();
             if (currentMode === "glitch" && snapshotImage) {
                 initGridFromImage(snapshotImage);
